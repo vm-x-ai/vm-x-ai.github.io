@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-V1FCGNF0CJ"></script>
 <script>function gtag(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],gtag("js",new Date),gtag("config","G-V1FCGNF0CJ",{})</script><link rel="stylesheet" href="/assets/css/styles.54940ae3.css">
-<script src="/assets/js/runtime~main.e9587c5b.js" defer="defer"></script>
-<script src="/assets/js/main.0a39a3e9.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.2fa3c6f0.js" defer="defer"></script>
+<script src="/assets/js/main.f8d245a4.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -20,8 +20,8 @@ without leaving the console. It lives at:</p>
 <div class="language-text codeBlockContainer_xz7v theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_Yy4o"><pre tabindex="0" class="prism-code language-text codeBlock_jzEt thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_vnYC"><span class="token-line" style="color:#393A34"><span class="token plain">/workspaces/&lt;workspaceId&gt;/&lt;environmentId&gt;/playground</span><br></span></code></pre></div></div>
 <p>…and is reachable from the sidebar&#x27;s &quot;Workspaces&quot; submenu, or from any
 AI Resource edit page via the <strong>Open playground</strong> button (which
-deep-links with the resource preselected).</p>
-<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="two-modes">Two modes<a href="#two-modes" class="hash-link" aria-label="Direct link to Two modes" title="Direct link to Two modes" translate="no">​</a></h2>
+deep-links with the resource preselected via <code>?resourceId=&lt;id&gt;</code>).</p>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="picking-the-model-resource-vs-connection--model">Picking the model: Resource vs. Connection / Model<a href="#picking-the-model-resource-vs-connection--model" class="hash-link" aria-label="Direct link to Picking the model: Resource vs. Connection / Model" title="Direct link to Picking the model: Resource vs. Connection / Model" translate="no">​</a></h2>
 <p>A toggle at the top of the page picks the source of the model spec:</p>
 <ul>
 <li class="">
@@ -31,53 +31,127 @@ picker pre-selects the first resource alphabetically (or the one
 passed via <code>?resourceId=&lt;id&gt;</code>).</p>
 </li>
 <li class="">
-<p><strong>Use Connection / Model</strong> — type a connection name and a model
-name directly. The gateway parses <code>&lt;connection_name&gt;/&lt;model_name&gt;</code>
-and builds an ephemeral resource on the fly, so you can prototype
-against any connection without first wrapping it in a Resource.</p>
+<p><strong>Use Connection / Model</strong> — type a connection name and a model name
+directly. The synthesised resource&#x27;s <code>name</code> becomes
+<code>&lt;connection&gt;/&lt;model&gt;</code>; the gateway recognises the slash syntax and
+builds an ephemeral resource on the fly, so you can prototype against
+any connection without first wrapping it in a Resource.</p>
 </li>
 </ul>
-<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="endpoint-mode--streaming">Endpoint mode + Streaming<a href="#endpoint-mode--streaming" class="hash-link" aria-label="Direct link to Endpoint mode + Streaming" title="Direct link to Endpoint mode + Streaming" translate="no">​</a></h2>
-<p>A toggle group at the top of the page picks one of three input
-formats. Each completion can be sent through:</p>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="picking-the-request-shape-the-surface-toggle">Picking the request shape (the surface toggle)<a href="#picking-the-request-shape-the-surface-toggle" class="hash-link" aria-label="Direct link to Picking the request shape (the surface toggle)" title="Direct link to Picking the request shape (the surface toggle)" translate="no">​</a></h2>
+<p>A three-way toggle picks which <strong>gateway endpoint</strong> the playground
+posts to. All three drive the same <code>useChat</code> hook from the Vercel AI
+SDK; only the upstream wire shape differs, and all three flow through
+the same routing / fallback / capacity / audit pipeline as production
+traffic.</p>
 <ul>
-<li class=""><strong>OpenAI — Chat Completions</strong> (default) — OpenAI&#x27;s classic shape;
-supports streaming on/off, all OpenAI-compatible providers, plus
-multimodal attachments (image / audio / file parts).</li>
-<li class=""><strong>OpenAI — Responses</strong> — OpenAI&#x27;s newer typed-events API. The
-Streaming toggle is disabled in this mode (single-shot
-non-streaming).</li>
+<li class=""><strong>OpenAI — Chat Completions</strong> — classic <code>POST /chat/completions</code>
+shape; supports streaming on/off, all OpenAI-compatible providers,
+plus multimodal attachments (image / audio / file parts).</li>
+<li class=""><strong>OpenAI — Responses</strong> — OpenAI&#x27;s typed-events Responses API.
+Reasoning summaries stream out of the box.</li>
 <li class=""><strong>Anthropic — Messages</strong> — drop-in compatibility with Anthropic&#x27;s
-<code>POST /v1/messages</code>. Same streaming caveat as Responses (toggle
-disabled).</li>
+<code>POST /v1/messages</code>. <code>thinking</code> deltas stream as reasoning chunks.</li>
 </ul>
-<p>All three go through the same routing/fallback/capacity/audit
-pipeline as production traffic.</p>
-<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="web-search">Web search<a href="#web-search" class="hash-link" aria-label="Direct link to Web search" title="Direct link to Web search" translate="no">​</a></h2>
-<p>Toggle <strong>Web search</strong> to ask the gateway to enable provider web
-search:</p>
+<p>Switching surfaces keeps each tab&#x27;s chat history independent (each
+surface has its own <code>useChat</code> instance), so you can A/B the same prompt
+across the three shapes without losing prior turns.</p>
+<blockquote>
+<p><strong>About the compatibility endpoints.</strong> The toggle picks the <em>request
+shape</em> the gateway accepts — the gateway then converts to the
+resource&#x27;s configured upstream provider regardless of which shape you
+chose. When the request shape and the resource&#x27;s provider already
+match (e.g. an Anthropic resource via Anthropic Messages), the
+gateway forwards the body verbatim with no shape conversion.</p>
+</blockquote>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="streaming-web-search-reasoning">Streaming, web search, reasoning<a href="#streaming-web-search-reasoning" class="hash-link" aria-label="Direct link to Streaming, web search, reasoning" title="Direct link to Streaming, web search, reasoning" translate="no">​</a></h2>
+<p>Three header switches:</p>
 <ul>
-<li class="">Chat Completions → <code>web_search_options: {}</code> (OpenAI search-class
-models, Perplexity sonar models)</li>
-<li class="">Responses → <code>tools: [{ type: &#x27;web_search_preview&#x27; }]</code></li>
-<li class="">Anthropic Messages → <code>tools: [{ type: &#x27;web_search_20250305&#x27; }]</code></li>
+<li class=""><strong>Streaming</strong> — on by default. When off, the BFF runs the upstream
+call non-streaming (<code>generateText</code>) and re-encodes the result as a
+one-burst UI message stream — <code>useChat</code> still consumes the same
+protocol, the reply just lands all at once instead of token-by-token.</li>
+<li class=""><strong>Web search</strong> — asks the BFF to inject the provider&#x27;s web-search
+tool. The shape varies per surface (see <a href="#bff-normalizations-and-guards" class="">BFF normalizations</a>).</li>
+<li class=""><strong>Reasoning effort</strong> — slider with stops <code>off / min / low / med / high</code>. The BFF translates the tier to the right field per surface:<!-- -->
+<ul>
+<li class="">Chat Completions → <code>reasoning_effort</code> (via
+<code>providerOptions.openai.reasoningEffort</code>)</li>
+<li class="">Responses → <code>reasoning: { effort, summary: &#x27;auto&#x27; }</code></li>
+<li class="">Anthropic → <code>thinking: { type: &#x27;enabled&#x27;, budget_tokens }</code>
+(mapped from tier: minimal=1024, low=2048, medium=4096, high=8192)</li>
 </ul>
-<p>Providers that don&#x27;t recognise the field ignore it.</p>
+</li>
+</ul>
+<p>Models that don&#x27;t support reasoning ignore the field.</p>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="bff-normalizations-and-guards">BFF normalizations and guards<a href="#bff-normalizations-and-guards" class="hash-link" aria-label="Direct link to BFF normalizations and guards" title="Direct link to BFF normalizations and guards" translate="no">​</a></h2>
+<p>The Playground talks to the gateway through three Next.js BFF routes —
+<code>/api/chat</code>, <code>/api/responses</code>, and <code>/api/anthropic</code> — that inject the
+<code>vmx</code> envelope, attach the signed-in OIDC access token, and normalise a
+few provider quirks the Vercel AI SDK is strict about. The gateway
+itself preserves upstream wire format verbatim; these adapters live in
+the UI so the gateway stays a clean passthrough.</p>
+<p>What the BFFs do:</p>
+<ul>
+<li class=""><strong>Inject the web-search tool per surface</strong>:<!-- -->
+<ul>
+<li class="">Chat Completions → <code>web_search_options: {}</code> (picked up by OpenAI
+search-class models; Perplexity sonar searches by default).</li>
+<li class="">Responses → adds <code>{ type: &#x27;web_search&#x27; }</code> to <code>tools[]</code>.</li>
+<li class="">Anthropic Messages → adds Anthropic&#x27;s canonical
+<code>{ type: &#x27;web_search_20250305&#x27;, name: &#x27;web_search&#x27; }</code> server tool;
+the gateway then translates that per upstream provider.</li>
+</ul>
+</li>
+<li class=""><strong>Block OpenAI Chat-Completions-only search models</strong> on the Responses
+and Anthropic surfaces. <code>gpt-5-search-api</code>,
+<code>gpt-4o-search-preview</code>, and <code>gpt-4o-mini-search-preview</code> only work
+via Chat Completions; selecting one on the wrong surface returns a
+<code>400 model_endpoint_mismatch</code> instead of a confusing upstream 500.</li>
+<li class=""><strong>Normalise upstream response shapes</strong> the AI SDK&#x27;s Zod schemas
+reject:<!-- -->
+<ul>
+<li class="">Chat Completions: nest flat <code>url_citation</code> annotations under their
+<code>url_citation</code> sub-object.</li>
+<li class="">Responses: drop non-canonical <code>output[]</code> items (e.g. Perplexity&#x27;s
+<code>search_results</code>) so the SDK can parse the body; rewrite non-2xx
+JSON error envelopes as a one-frame SSE <code>error</code> event on the
+streaming path.</li>
+<li class="">Anthropic: strip the placeholder <code>thinking</code> content in
+<code>message_start</code>, drop <code>citations: null</code> from non-streaming bodies,
+and SSE-encode JSON error envelopes on the streaming path.</li>
+</ul>
+</li>
+</ul>
+<p>These are the kinds of quirks you&#x27;d otherwise hit as silent 500s. They
+live exclusively in the BFF — the gateway never rewrites a provider
+body.</p>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="gateway-envelope-inputs">Gateway envelope inputs<a href="#gateway-envelope-inputs" class="hash-link" aria-label="Direct link to Gateway envelope inputs" title="Direct link to Gateway envelope inputs" translate="no">​</a></h2>
-<p>A side panel on the page exposes the optional <code>vmx</code> envelope inputs
-so you can exercise correlation, metadata-tagging, and per-call
-resource overrides without leaving the playground:</p>
+<p>A side panel exposes the optional <code>vmx</code> envelope inputs so you can
+exercise correlation, metadata-tagging, and per-call resource overrides
+without leaving the playground. See
+<a class="" href="/docs/api/vmx-envelope/">The <code>vmx</code> envelope</a> for the full field list.</p>
 <ul>
-<li class=""><strong>Correlation ID</strong> — forwarded as <code>vmx.correlationId</code>; lets you
-group multi-step calls in the audit / usage views.</li>
-<li class=""><strong>Metadata</strong> — key/value pairs forwarded as <code>vmx.metadata</code>. The
+<li class="">
+<p><strong>Correlation ID</strong> — forwarded as <code>vmx.correlationId</code>; surfaces on
+the audit row, metrics, and the <code>x-vmx-correlation-id</code> response
+header.</p>
+</li>
+<li class="">
+<p><strong>Metadata</strong> — key/value pairs forwarded as <code>vmx.metadata</code>. The
 playground always tags sends with <code>playground=true</code> and the
-signed-in <code>user_id</code> so audit filters can separate playground
-traffic from real workload.</li>
-<li class=""><strong>Resource override JSON</strong> — a free-form JSON object merged into
-the resource via <code>vmx.resourceConfigOverrides</code> for the duration of
-the call (handy for tweaking model parameters without saving the
-resource).</li>
+signed-in <code>user_id</code> so audit/usage filters can separate playground
+traffic from real workload. User-specified pairs win on key
+collision.</p>
+</li>
+<li class="">
+<p><strong>Resource override JSON</strong> — a free-form JSON object shallow-merged
+on top of the picked resource and forwarded as
+<code>vmx.resourceConfigOverrides</code> for the duration of the call. Handy
+for swapping the model or tightening retries/timeouts without
+editing the resource. Example:</p>
+<div class="language-json codeBlockContainer_xz7v theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_Yy4o"><pre tabindex="0" class="prism-code language-json codeBlock_jzEt thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_vnYC"><span class="token-line" style="color:#393A34"><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">  </span><span class="token property" style="color:#36acaa">&quot;model&quot;</span><span class="token operator" style="color:#393A34">:</span><span class="token plain"> </span><span class="token punctuation" style="color:#393A34">{</span><span class="token plain"></span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token property" style="color:#36acaa">&quot;provider&quot;</span><span class="token operator" style="color:#393A34">:</span><span class="token plain"> </span><span class="token string" style="color:#e3116c">&quot;anthropic&quot;</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token property" style="color:#36acaa">&quot;connectionId&quot;</span><span class="token operator" style="color:#393A34">:</span><span class="token plain"> </span><span class="token string" style="color:#e3116c">&quot;&lt;connId&gt;&quot;</span><span class="token punctuation" style="color:#393A34">,</span><span class="token plain"></span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">    </span><span class="token property" style="color:#36acaa">&quot;model&quot;</span><span class="token operator" style="color:#393A34">:</span><span class="token plain"> </span><span class="token string" style="color:#e3116c">&quot;claude-haiku-4-5-20251001&quot;</span><span class="token plain"></span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">  </span><span class="token punctuation" style="color:#393A34">}</span><span class="token plain"></span><br></span><span class="token-line" style="color:#393A34"><span class="token plain"></span><span class="token punctuation" style="color:#393A34">}</span><br></span></code></pre></div></div>
+</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="multimodal-input">Multimodal input<a href="#multimodal-input" class="hash-link" aria-label="Direct link to Multimodal input" title="Direct link to Multimodal input" translate="no">​</a></h2>
 <p>The chat box accepts:</p>
@@ -91,17 +165,30 @@ drag/drop onto the chat panel, or click the paperclip.</li>
 filename, size, and a remove (✕) button. Total attachment payload is
 capped at <strong>100 MB</strong> per request — the BFF and Fastify gateway are both
 configured for that ceiling.</p>
-<p>The gateway forwards the attachment as the right OpenAI content type
-(<code>image_url</code> data URL, <code>input_audio</code>, <code>file</code>) and lets the provider
-decide whether it can handle that modality. If the provider rejects it,
-the error surfaces in the chat panel.</p>
-<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="audit--storage">Audit + storage<a href="#audit--storage" class="hash-link" aria-label="Direct link to Audit + storage" title="Direct link to Audit + storage" translate="no">​</a></h3>
+<blockquote>
+<p><strong>Attachments are Chat-Completions-only today.</strong> The Responses and
+Anthropic surfaces ignore the <code>files</code> argument; only the
+<code>/api/chat</code> route forwards them downstream.</p>
+</blockquote>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="audit-drawer--storage">Audit drawer + storage<a href="#audit-drawer--storage" class="hash-link" aria-label="Direct link to Audit drawer + storage" title="Direct link to Audit drawer + storage" translate="no">​</a></h3>
+<p>Every bot reply has a <strong>View audit details</strong> action that opens an
+in-page drawer with the matching audit row (cost, headers, events,
+full response payload). The audit service buffers writes for up to
+10 s before flushing to Postgres, so a quick click right after a reply
+polls every 2 s until the row lands.</p>
 <p>Audit rows store <strong>metadata only</strong> for attachments — the mime type,
 byte size, and a SHA-256 of the base64 payload — not the bytes
 themselves. This keeps the <code>request_audit.request_payload</code> JSONB
 column small and avoids carrying potentially-PII&#x27;d bytes around. The
 live request to the provider always includes the full bytes; only the
 audit-row copy is sanitised.</p>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="how-state-is-kept">How state is kept<a href="#how-state-is-kept" class="hash-link" aria-label="Direct link to How state is kept" title="Direct link to How state is kept" translate="no">​</a></h2>
+<p>The page is a client component. State lives in React <code>useState</code> /
+<code>useChat</code> only — nothing is persisted to <code>localStorage</code>, so a refresh
+clears history. Each surface has its own <code>useChat</code> instance keyed by
+the selected resource (or the literal <code>connection-model-ephemeral</code> key
+in Connection / Model mode), so switching surfaces keeps per-tab
+history while switching the resource resets it.</p>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="see-also">See also<a href="#see-also" class="hash-link" aria-label="Direct link to See also" title="Direct link to See also" translate="no">​</a></h2>
 <ul>
 <li class=""><a class="" href="/docs/api/chat-completions/">Chat Completions API</a></li>
@@ -110,7 +197,8 @@ audit-row copy is sanitised.</p>
 format-preservation rules for the <code>anthropic/messages</code> route.</li>
 <li class=""><a class="" href="/docs/api/vmx-envelope/">The <code>vmx</code> envelope</a> — what the playground&#x27;s
 side panel forwards.</li>
-<li class=""><a class="" href="/docs/api/web-search/">Web search</a> — per-format toggle wiring.</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/capacity/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Resource-Level Capacity</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/prioritization/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Prioritization</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#two-modes" class="table-of-contents__link toc-highlight">Two modes</a></li><li><a href="#endpoint-mode--streaming" class="table-of-contents__link toc-highlight">Endpoint mode + Streaming</a></li><li><a href="#web-search" class="table-of-contents__link toc-highlight">Web search</a></li><li><a href="#gateway-envelope-inputs" class="table-of-contents__link toc-highlight">Gateway envelope inputs</a></li><li><a href="#multimodal-input" class="table-of-contents__link toc-highlight">Multimodal input</a><ul><li><a href="#audit--storage" class="table-of-contents__link toc-highlight">Audit + storage</a></li></ul></li><li><a href="#see-also" class="table-of-contents__link toc-highlight">See also</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
+<li class=""><a class="" href="/docs/api/web-search/">Web search</a> — per-surface tool wiring and the
+Chat-Completions-only model list.</li>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/capacity/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Resource-Level Capacity</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/prioritization/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Prioritization</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#picking-the-model-resource-vs-connection--model" class="table-of-contents__link toc-highlight">Picking the model: Resource vs. Connection / Model</a></li><li><a href="#picking-the-request-shape-the-surface-toggle" class="table-of-contents__link toc-highlight">Picking the request shape (the surface toggle)</a></li><li><a href="#streaming-web-search-reasoning" class="table-of-contents__link toc-highlight">Streaming, web search, reasoning</a></li><li><a href="#bff-normalizations-and-guards" class="table-of-contents__link toc-highlight">BFF normalizations and guards</a></li><li><a href="#gateway-envelope-inputs" class="table-of-contents__link toc-highlight">Gateway envelope inputs</a></li><li><a href="#multimodal-input" class="table-of-contents__link toc-highlight">Multimodal input</a><ul><li><a href="#audit-drawer--storage" class="table-of-contents__link toc-highlight">Audit drawer + storage</a></li></ul></li><li><a href="#how-state-is-kept" class="table-of-contents__link toc-highlight">How state is kept</a></li><li><a href="#see-also" class="table-of-contents__link toc-highlight">See also</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

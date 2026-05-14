@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-V1FCGNF0CJ"></script>
 <script>function gtag(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],gtag("js",new Date),gtag("config","G-V1FCGNF0CJ",{})</script><link rel="stylesheet" href="/assets/css/styles.54940ae3.css">
-<script src="/assets/js/runtime~main.e9587c5b.js" defer="defer"></script>
-<script src="/assets/js/main.0a39a3e9.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.2fa3c6f0.js" defer="defer"></script>
+<script src="/assets/js/main.f8d245a4.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -21,6 +21,18 @@ time-series store — audit rows are the single source of truth, and the
 Usage page runs aggregate SQL (<code>sum</code>, <code>avg</code>, <code>percentile_cont</code>, …) over
 them with per-bucket time grouping. This guide explains how to access
 and use this data.</p>
+<blockquote>
+<p><strong>Multi-surface gateway.</strong> Every completion enters the gateway through
+one of three wire formats — OpenAI Chat Completions
+(<code>/chat/completions</code>), OpenAI Responses (<code>/responses</code>), or Anthropic
+Messages (<code>/anthropic/messages</code>) — and lands in the same
+<a href="https://github.com/vm-x-ai/vm-x-ai/blob/main/packages/api/src/migrations/10-request-audit-table.ts" target="_blank" rel="noopener noreferrer" class=""><code>request_audit</code></a>
+row. The surface is recorded on the
+<a href="https://github.com/vm-x-ai/vm-x-ai/blob/main/packages/api/src/migrations/19-add-request-audit-format.ts" target="_blank" rel="noopener noreferrer" class=""><code>format</code></a>
+column (<code>chat-completions</code> / <code>responses</code> / <code>anthropic</code>) so every chart,
+filter, and otel attribute can attribute spend back to the surface that
+produced it.</p>
+</blockquote>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="overview">Overview<a href="#overview" class="hash-link" aria-label="Direct link to Overview" title="Direct link to Overview" translate="no">​</a></h2>
 <p>VM-X AI tracks:</p>
 <ul>
@@ -85,11 +97,12 @@ leaving the SDK shape.</p>
 <ul>
 <li class=""><strong>id</strong>: Unique request ID</li>
 <li class=""><strong>timestamp</strong>: Request timestamp</li>
-<li class=""><strong>endpoint</strong>: <code>CHAT_COMPLETIONS</code>, <code>ANTHROPIC_MESSAGES</code>, or <code>RESPONSES</code></li>
-<li class=""><strong>workspaceId</strong>: Workspace ID</li>
-<li class=""><strong>environmentId</strong>: Environment ID</li>
-<li class=""><strong>resourceId</strong>: AI Resource ID</li>
-<li class=""><strong>connectionId</strong>: AI Connection ID</li>
+<li class=""><strong>type</strong>: <code>COMPLETION</code>, <code>COMPLETION_BATCH</code>, or <code>RESPONSES</code> — the audit-row classifier, set by the orchestrator (see <code>PublicRequestAuditType</code> in <a href="https://github.com/vm-x-ai/vm-x-ai/blob/main/packages/api/src/storage/entities.generated.ts" target="_blank" rel="noopener noreferrer" class=""><code>entities.generated.ts</code></a>)</li>
+<li class=""><strong>format</strong>: Inbound wire surface — <code>chat-completions</code>, <code>responses</code>, or <code>anthropic</code>. Drives the colour-coded <strong>Endpoint</strong> badge in the Audit drawer and is a first-class filter / group-by dimension on the Usage page</li>
+<li class=""><strong>workspaceId</strong>: Workspace ID (top-level scope)</li>
+<li class=""><strong>environmentId</strong>: Environment ID (sub-scope inside the workspace; every audit row is keyed <code>(workspaceId, environmentId)</code> and the Usage query endpoint is mounted at <code>/request-usage/:workspaceId/:environmentId</code>)</li>
+<li class=""><strong>resourceId</strong>: AI Resource ID (or <code>ephemeral</code> for ad-hoc <code>&lt;connection&gt;/&lt;model&gt;</code> requests)</li>
+<li class=""><strong>connectionId</strong>: AI Connection ID (the upstream provider credential bundle that actually ran the request)</li>
 <li class=""><strong>provider</strong>: Provider name</li>
 <li class=""><strong>model</strong>: Model name</li>
 <li class=""><strong>statusCode</strong>: HTTP status code</li>
@@ -132,12 +145,17 @@ slice spend by resource, provider, or environment without leaving VM-X.</p>
 <p>The breakdown carries:</p>
 <table><thead><tr><th>Field</th><th>What it covers</th></tr></thead><tbody><tr><td><code>inputCost</code></td><td>Prompt tokens at the base input rate. <strong>Cached reads and cache writes are subtracted out</strong> so they don&#x27;t double-bill.</td></tr><tr><td><code>outputCost</code></td><td>Completion tokens at the base output rate (excluding reasoning tokens, which bill separately).</td></tr><tr><td><code>cachedCost</code></td><td>Input tokens <em>read</em> from the prompt cache, billed at the discounted cache-read rate.</td></tr><tr><td><code>reasoningCost</code></td><td>Output tokens spent on internal reasoning (Anthropic extended thinking, OpenAI o-series).</td></tr><tr><td><code>cacheCreationCost</code></td><td>Input tokens <em>written</em> to the prompt cache (Anthropic-only, currently). 5-minute ephemeral writes bill at 1.25× regular input; 1-hour ephemeral writes at 2×. The per-TTL split is applied automatically when the upstream reports it; otherwise the 5m multiplier is the default.</td></tr><tr><td><code>totalCost</code></td><td>Sum of all of the above.</td></tr></tbody></table>
 <p>If a model is missing from <code>model_pricing</code> (e.g., a brand-new release),
-<code>CostService</code> records <code>cost: null</code> on the audit row (so dashboards can
-distinguish &quot;pricing not configured&quot; from &quot;actually zero&quot;). Manage
-entries from <strong>Settings → Pricing</strong> in the console (full CRUD, with the
-rows from migration 17 prepopulated for the major providers). Newly-
-added rows take effect on the next audit row written; historical rows
-keep whatever cost breakdown was computed at the time they were stored.</p>
+<a href="https://github.com/vm-x-ai/vm-x-ai/blob/main/packages/api/src/gateway/cost/cost.service.ts" target="_blank" rel="noopener noreferrer" class=""><code>CostService</code></a>
+records <code>cost: null</code> on the audit row (so dashboards can distinguish
+&quot;pricing not configured&quot; from &quot;actually zero&quot;). Manage entries from
+<strong>Settings → Pricing</strong> in the console (full CRUD). The seed in
+<a href="https://github.com/vm-x-ai/vm-x-ai/blob/main/packages/api/src/migrations/17-create-model-pricing-table.ts" target="_blank" rel="noopener noreferrer" class="">migration 17</a>
+loads <code>SYSTEM</code>-source rows from the bundled
+<a href="https://github.com/vm-x-ai/vm-x-ai/blob/main/packages/api/src/data/pricing-fallback.json" target="_blank" rel="noopener noreferrer" class=""><code>pricing-fallback.json</code></a>
+snapshot via <code>INSERT … ON CONFLICT DO NOTHING</code>, so re-running migrations
+never clobbers operator overrides. Newly-added rows take effect on the
+next audit row written; historical rows keep whatever cost breakdown was
+computed at the time they were stored.</p>
 <h4 class="anchor anchorTargetStickyNavbar_XtlD" id="anthropic-prompt-caching--saving-cost-end-to-end">Anthropic prompt caching — saving cost end-to-end<a href="#anthropic-prompt-caching--saving-cost-end-to-end" class="hash-link" aria-label="Direct link to Anthropic prompt caching — saving cost end-to-end" title="Direct link to Anthropic prompt caching — saving cost end-to-end" translate="no">​</a></h4>
 <p>VM-X preserves Anthropic&#x27;s <code>cache_control</code> markers (<code>{ type: &#x27;ephemeral&#x27;, ttl: &#x27;5m&#x27; | &#x27;1h&#x27; }</code>) end-to-end on Anthropic-native providers (the new native <code>AnthropicProvider</code>, AWS Bedrock-Invoke for Claude models). Mark the long, frozen part of your prompt with <code>cache_control</code> and Anthropic returns the next-run input as cached reads at ~10% of the regular input rate.</p>
 <p>You can place markers on:</p>
@@ -335,20 +353,14 @@ diverts traffic.</p>
 <li class="">Monitor access patterns</li>
 <li class="">Track user activity</li>
 </ul>
-<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="exporting-data">Exporting Data<a href="#exporting-data" class="hash-link" aria-label="Direct link to Exporting Data" title="Direct link to Exporting Data" translate="no">​</a></h2>
-<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="audit-logs-1">Audit Logs<a href="#audit-logs-1" class="hash-link" aria-label="Direct link to Audit Logs" title="Direct link to Audit Logs" translate="no">​</a></h3>
-<p>Export audit logs for:</p>
-<ul>
-<li class="">Compliance requirements</li>
-<li class="">External analysis</li>
-<li class="">Backup and archival</li>
-</ul>
-<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="usage-metrics-1">Usage Metrics<a href="#usage-metrics-1" class="hash-link" aria-label="Direct link to Usage Metrics" title="Direct link to Usage Metrics" translate="no">​</a></h3>
-<p>Export usage metrics to:</p>
-<ul>
-<li class="">Business intelligence tools</li>
-<li class="">Performance analysis tools</li>
-<li class="">Custom dashboards</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/prioritization/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Prioritization</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/batch-completion/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Batch Completion</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#the-vmx-envelope" class="table-of-contents__link toc-highlight">The <code>vmx</code> Envelope</a></li><li><a href="#audit-logs" class="table-of-contents__link toc-highlight">Audit Logs</a><ul><li><a href="#whats-logged" class="table-of-contents__link toc-highlight">What&#39;s Logged</a></li><li><a href="#accessing-audit-logs" class="table-of-contents__link toc-highlight">Accessing Audit Logs</a></li><li><a href="#audit-log-fields" class="table-of-contents__link toc-highlight">Audit Log Fields</a></li><li><a href="#cost-tracking" class="table-of-contents__link toc-highlight">Cost Tracking</a></li><li><a href="#exporting-audit-logs" class="table-of-contents__link toc-highlight">Exporting Audit Logs</a></li></ul></li><li><a href="#usage-metrics" class="table-of-contents__link toc-highlight">Usage Metrics</a><ul><li><a href="#metrics-tracked" class="table-of-contents__link toc-highlight">Metrics Tracked</a></li><li><a href="#group-by-dimensions" class="table-of-contents__link toc-highlight">Group-by dimensions</a></li><li><a href="#time-bucketing" class="table-of-contents__link toc-highlight">Time bucketing</a></li><li><a href="#filtering" class="table-of-contents__link toc-highlight">Filtering</a></li><li><a href="#accessing-usage-metrics" class="table-of-contents__link toc-highlight">Accessing Usage Metrics</a></li></ul></li><li><a href="#additional-charts" class="table-of-contents__link toc-highlight">Additional charts</a></li><li><a href="#opentelemetry-integration" class="table-of-contents__link toc-highlight">OpenTelemetry Integration</a><ul><li><a href="#metrics-exported" class="table-of-contents__link toc-highlight">Metrics Exported</a></li><li><a href="#traces-exported" class="table-of-contents__link toc-highlight">Traces Exported</a></li><li><a href="#configuring-opentelemetry" class="table-of-contents__link toc-highlight">Configuring OpenTelemetry</a></li><li><a href="#supported-backends" class="table-of-contents__link toc-highlight">Supported Backends</a></li></ul></li><li><a href="#dashboard-examples" class="table-of-contents__link toc-highlight">Dashboard Examples</a><ul><li><a href="#request-volume" class="table-of-contents__link toc-highlight">Request Volume</a></li><li><a href="#token-usage" class="table-of-contents__link toc-highlight">Token Usage</a></li><li><a href="#error-rates" class="table-of-contents__link toc-highlight">Error Rates</a></li><li><a href="#capacity-utilization" class="table-of-contents__link toc-highlight">Capacity Utilization</a></li></ul></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-regular-monitoring" class="table-of-contents__link toc-highlight">1. Regular Monitoring</a></li><li><a href="#2-capacity-planning" class="table-of-contents__link toc-highlight">2. Capacity Planning</a></li><li><a href="#3-performance-optimization" class="table-of-contents__link toc-highlight">3. Performance Optimization</a></li><li><a href="#4-compliance" class="table-of-contents__link toc-highlight">4. Compliance</a></li></ul></li><li><a href="#exporting-data" class="table-of-contents__link toc-highlight">Exporting Data</a><ul><li><a href="#audit-logs-1" class="table-of-contents__link toc-highlight">Audit Logs</a></li><li><a href="#usage-metrics-1" class="table-of-contents__link toc-highlight">Usage Metrics</a></li></ul></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="retention">Retention<a href="#retention" class="hash-link" aria-label="Direct link to Retention" title="Direct link to Retention" translate="no">​</a></h2>
+<p>Audit rows live in the Postgres <code>request_audit</code> table indefinitely —
+there is no built-in TTL job or rolling window. Both audit and usage
+views are powered by the same rows, so deleting old data also shortens
+the Usage page&#x27;s effective lookback window. Operators who need bounded
+retention should run a scheduled <code>DELETE FROM request_audit WHERE timestamp &lt; now() - interval &#x27;&lt;N&gt; days&#x27;</code> via their own cron (and <code>VACUUM</code>
+afterwards so the indexed table reclaims space). Per-row export for
+compliance / archival can be driven off the same <code>timestamp</code> predicate
+before deletion.</p></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/prioritization/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Prioritization</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/batch-completion/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Batch Completion</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#the-vmx-envelope" class="table-of-contents__link toc-highlight">The <code>vmx</code> Envelope</a></li><li><a href="#audit-logs" class="table-of-contents__link toc-highlight">Audit Logs</a><ul><li><a href="#whats-logged" class="table-of-contents__link toc-highlight">What&#39;s Logged</a></li><li><a href="#accessing-audit-logs" class="table-of-contents__link toc-highlight">Accessing Audit Logs</a></li><li><a href="#audit-log-fields" class="table-of-contents__link toc-highlight">Audit Log Fields</a></li><li><a href="#cost-tracking" class="table-of-contents__link toc-highlight">Cost Tracking</a></li><li><a href="#exporting-audit-logs" class="table-of-contents__link toc-highlight">Exporting Audit Logs</a></li></ul></li><li><a href="#usage-metrics" class="table-of-contents__link toc-highlight">Usage Metrics</a><ul><li><a href="#metrics-tracked" class="table-of-contents__link toc-highlight">Metrics Tracked</a></li><li><a href="#group-by-dimensions" class="table-of-contents__link toc-highlight">Group-by dimensions</a></li><li><a href="#time-bucketing" class="table-of-contents__link toc-highlight">Time bucketing</a></li><li><a href="#filtering" class="table-of-contents__link toc-highlight">Filtering</a></li><li><a href="#accessing-usage-metrics" class="table-of-contents__link toc-highlight">Accessing Usage Metrics</a></li></ul></li><li><a href="#additional-charts" class="table-of-contents__link toc-highlight">Additional charts</a></li><li><a href="#opentelemetry-integration" class="table-of-contents__link toc-highlight">OpenTelemetry Integration</a><ul><li><a href="#metrics-exported" class="table-of-contents__link toc-highlight">Metrics Exported</a></li><li><a href="#traces-exported" class="table-of-contents__link toc-highlight">Traces Exported</a></li><li><a href="#configuring-opentelemetry" class="table-of-contents__link toc-highlight">Configuring OpenTelemetry</a></li><li><a href="#supported-backends" class="table-of-contents__link toc-highlight">Supported Backends</a></li></ul></li><li><a href="#dashboard-examples" class="table-of-contents__link toc-highlight">Dashboard Examples</a><ul><li><a href="#request-volume" class="table-of-contents__link toc-highlight">Request Volume</a></li><li><a href="#token-usage" class="table-of-contents__link toc-highlight">Token Usage</a></li><li><a href="#error-rates" class="table-of-contents__link toc-highlight">Error Rates</a></li><li><a href="#capacity-utilization" class="table-of-contents__link toc-highlight">Capacity Utilization</a></li></ul></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-regular-monitoring" class="table-of-contents__link toc-highlight">1. Regular Monitoring</a></li><li><a href="#2-capacity-planning" class="table-of-contents__link toc-highlight">2. Capacity Planning</a></li><li><a href="#3-performance-optimization" class="table-of-contents__link toc-highlight">3. Performance Optimization</a></li><li><a href="#4-compliance" class="table-of-contents__link toc-highlight">4. Compliance</a></li></ul></li><li><a href="#retention" class="table-of-contents__link toc-highlight">Retention</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-V1FCGNF0CJ"></script>
 <script>function gtag(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],gtag("js",new Date),gtag("config","G-V1FCGNF0CJ",{})</script><link rel="stylesheet" href="/assets/css/styles.54940ae3.css">
-<script src="/assets/js/runtime~main.e9587c5b.js" defer="defer"></script>
-<script src="/assets/js/main.0a39a3e9.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.2fa3c6f0.js" defer="defer"></script>
+<script src="/assets/js/main.f8d245a4.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -26,6 +26,15 @@
 <li class=""><strong>Content analysis</strong>: Route based on message content or patterns</li>
 <li class=""><strong>Traffic splitting</strong>: A/B test models or gradually roll out new models</li>
 </ul>
+<p>Routing is one knob on an AI Resource and runs <strong>once per request</strong>,
+before any provider call. Its job is to pick the <em>first</em> model the
+gateway will try. After routing produces a model, the resource&#x27;s
+<a class="" href="/docs/features/ai-resources/fallback/">fallback</a> chain still runs if that model fails, and
+the resource&#x27;s <a class="" href="/docs/features/ai-resources/capacity/">capacity</a> limits still apply. The same
+routing rules fire for any of the three gateway surfaces — OpenAI
+Chat Completions, OpenAI Responses, and Anthropic Messages — because
+non-Responses requests are converted to the canonical Responses shape
+before routing evaluates conditions.</p>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="basic-routing">Basic Routing<a href="#basic-routing" class="hash-link" aria-label="Direct link to Basic Routing" title="Direct link to Basic Routing" translate="no">​</a></h2>
 <p>Route based on simple conditions. This example demonstrates token-based routing, where requests with fewer than 100 input tokens are routed to a faster, cost-effective model (Groq with <code>openai/gpt-oss-20b</code>), while larger requests use the default primary model.</p>
 <p><strong>Use Case</strong>: Optimize costs and latency by routing small, simple queries to faster models while reserving more powerful models for complex requests.</p>
@@ -55,10 +64,14 @@
 <p><img decoding="async" loading="lazy" alt="Tools-Based Routing Configuration" src="/assets/images/ai-resource-dynamic-has-tools-fce87bef8116df3d829ffca8c467ded1.png" width="1662" height="518" class="img_X5yv"></p>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="available-routing-fields-and-expressions">Available Routing Fields and Expressions<a href="#available-routing-fields-and-expressions" class="hash-link" aria-label="Direct link to Available Routing Fields and Expressions" title="Direct link to Available Routing Fields and Expressions" translate="no">​</a></h2>
 <p>Routing conditions evaluate against a small set of request-shaped
-variables. The OpenAI-shape body is always available under <code>request.*</code>
-regardless of which endpoint the caller used (Chat Completions,
-Responses, or Anthropic Messages) — Responses and Anthropic requests
-are converted to OpenAI shape before routing runs.</p>
+variables. The <strong>canonical shape is OpenAI Responses</strong> — Chat
+Completions and Anthropic Messages requests are converted to the
+Responses shape before routing runs, so the same template works
+across all three gateway surfaces. See the
+<a href="https://github.com/vm-x-ai/open-vm-x-ai/blob/main/packages/api/src/gateway/routing.context.ts" target="_blank" rel="noopener noreferrer" class=""><code>RoutingContext</code></a>
+type and
+<a href="https://github.com/vm-x-ai/open-vm-x-ai/blob/main/packages/api/src/gateway/routing.service.ts" target="_blank" rel="noopener noreferrer" class=""><code>ResourceRoutingService</code></a>
+for the exact set of variables exposed to EJS.</p>
 <h3 class="anchor anchorTargetStickyNavbar_XtlD" id="token-based-conditions">Token-Based Conditions<a href="#token-based-conditions" class="hash-link" aria-label="Direct link to Token-Based Conditions" title="Direct link to Token-Based Conditions" translate="no">​</a></h3>
 <ul>
 <li class=""><strong><code>tokens.input</code></strong>: Number of input tokens in the request<!-- -->
@@ -67,35 +80,52 @@ are converted to OpenAI shape before routing runs.</p>
 </ul>
 </li>
 </ul>
-<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="request-conditions">Request Conditions<a href="#request-conditions" class="hash-link" aria-label="Direct link to Request Conditions" title="Direct link to Request Conditions" translate="no">​</a></h3>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="request-conditions-canonical-responses-shape">Request Conditions (Canonical Responses Shape)<a href="#request-conditions-canonical-responses-shape" class="hash-link" aria-label="Direct link to Request Conditions (Canonical Responses Shape)" title="Direct link to Request Conditions (Canonical Responses Shape)" translate="no">​</a></h3>
+<p>Spread of the canonical Responses-shape body, so any Responses field
+is reachable as <code>request.&lt;field&gt;</code>:</p>
 <ul>
-<li class=""><strong><code>request.model</code></strong>: The resource name the caller targeted (the
-request&#x27;s <code>model</code> field).</li>
-<li class=""><strong><code>request.messagesCount</code></strong>: Number of messages in the request.</li>
-<li class=""><strong><code>request.toolsCount</code></strong>: Number of tools declared on the request.
-Use <code>GREATER_THAN 0</code> to check whether the request uses tools at all.</li>
+<li class=""><strong><code>request.model</code></strong>: The resource name the caller targeted.</li>
+<li class=""><strong><code>request.input</code></strong>: The Responses input items array (or string).</li>
+<li class=""><strong><code>request.instructions</code></strong>: Responses-style system instructions.</li>
+<li class=""><strong><code>request.tools</code></strong>: Tool definitions attached to the request.</li>
+<li class=""><strong><code>request.reasoning</code></strong>: Reasoning config block when present.</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="derived-convenience-variables">Derived Convenience Variables<a href="#derived-convenience-variables" class="hash-link" aria-label="Direct link to Derived Convenience Variables" title="Direct link to Derived Convenience Variables" translate="no">​</a></h3>
+<p>To keep familiar Chat-Completions-style expressions working, the
+routing engine derives a few helpers from the canonical Responses
+body:</p>
+<ul>
+<li class=""><strong><code>request.messages</code></strong>: A <code>{ role, content }[]</code> view derived from
+<code>instructions</code> + <code>input</code> (<code>developer</code> items collapse into <code>system</code>).
+Function-call items and tool-result items are skipped — branch on
+<code>request.input</code> directly if you need them.</li>
+<li class=""><strong><code>request.messagesCount</code></strong>: Length of the derived <code>messages</code> array.</li>
+<li class=""><strong><code>request.toolsCount</code></strong>: <code>request.tools?.length ?? 0</code>. Use
+<code>GREATER_THAN 0</code> to check whether the request uses tools at all.</li>
 <li class=""><strong><code>request.firstMessage</code></strong> / <strong><code>request.lastMessage</code></strong>: First and
-last message objects. Read <code>.content</code> for the text body. Both are
-<code>undefined</code> when the request has no messages.</li>
-<li class=""><strong><code>request.allMessagesContent</code></strong>: All message contents joined into
-a single string. Supports <code>CONTAINS</code> and <code>PATTERN</code>. Length-based
-routing uses <code>request.allMessagesContent.length</code> with a numeric
-comparator.</li>
+last derived message objects. Read <code>.content</code> for the text body.
+Both are <code>undefined</code> when the request has no messages.</li>
+<li class=""><strong><code>request.allMessagesContent</code></strong>: All derived message contents
+joined into a single string. Supports <code>CONTAINS</code> and <code>PATTERN</code>.
+Length-based routing uses <code>request.allMessagesContent.length</code> with
+a numeric comparator.</li>
 </ul>
 <h3 class="anchor anchorTargetStickyNavbar_XtlD" id="format-and-native-body-conditions">Format and Native-Body Conditions<a href="#format-and-native-body-conditions" class="hash-link" aria-label="Direct link to Format and Native-Body Conditions" title="Direct link to Format and Native-Body Conditions" translate="no">​</a></h3>
 <p>Routing rules can also branch on the <strong>input format</strong> the client
-used and read fields the OpenAI conversion would otherwise drop:</p>
+used and read fields the canonical Responses conversion drops:</p>
 <ul>
-<li class=""><strong><code>request.format</code></strong>: One of <code>&quot;openai&quot;</code>, <code>&quot;responses&quot;</code>,
+<li class=""><strong><code>request.format</code></strong>: One of <code>&quot;chat-completions&quot;</code>, <code>&quot;responses&quot;</code>,
 <code>&quot;anthropic&quot;</code>. Lets a single resource apply different rules
 depending on which endpoint was hit.</li>
 <li class=""><strong><code>request.nativeBody</code></strong>: The original request body, before
 format conversion. Use this to read provider-native fields that
-the OpenAI shape doesn&#x27;t model — for example
-<code>request.nativeBody.thinking</code> (Anthropic extended thinking),
-<code>request.nativeBody.cache_control</code> (Anthropic prompt caching),
-<code>request.nativeBody.instructions</code> or <code>request.nativeBody.reasoning</code>
-(Responses-only fields).</li>
+the canonical shape doesn&#x27;t model — for example
+<code>request.nativeBody.thinking</code> (Anthropic extended thinking) or
+<code>request.nativeBody.cache_control</code> (Anthropic prompt caching).
+When <code>request.format === &#x27;chat-completions&#x27;</code> it&#x27;s the OpenAI
+Chat Completions body; when <code>&#x27;responses&#x27;</code> it&#x27;s the original
+Responses body (same as <code>request</code>); when <code>&#x27;anthropic&#x27;</code> it&#x27;s the
+Anthropic Messages body.</li>
 </ul>
 <p>These fields are evaluated through EJS, so they appear in advanced-
 mode routing expressions like
@@ -135,10 +165,12 @@ model, and optional per-model <code>maxRetries</code> / <code>timeoutMs</code>).
 is the default action used by token-based, error-rate-based, and
 traffic-splitting routes.</li>
 <li class=""><strong><code>BLOCK</code></strong> — when the route matches, the gateway short-circuits
-and returns <code>400 Bad Request</code> to the caller without calling any
-provider. Use this to enforce policy at the routing layer (for
-example, block requests whose prompt matches a known
-prompt-injection probe).</li>
+and returns <code>400 Bad Request</code> with an OpenAI-compatible
+<code>blocked_by_routing_condition</code> error to the caller without
+calling any provider. Use this to enforce policy at the routing
+layer (for example, block requests whose prompt matches a known
+prompt-injection probe). Blocked requests are also marked
+non-retryable, so fallback does <strong>not</strong> run.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="traffic-splitting">Traffic Splitting<a href="#traffic-splitting" class="hash-link" aria-label="Direct link to Traffic Splitting" title="Direct link to Traffic Splitting" translate="no">​</a></h2>
 <p>Use traffic splitting for A/B testing, gradual rollouts, or canary deployments. This example routes 50% of requests matching the condition (input tokens &gt; 0) to Groq with <code>openai/gpt-oss-20b</code>, while the other 50% use the default primary model.</p>
@@ -215,6 +247,6 @@ percentage. If no route matches, the resource&#x27;s primary model is used.</p>
 <li class=""><a class="" href="/docs/features/ai-resources/fallback/">Fallback</a> - Configure automatic fallback</li>
 <li class=""><a class="" href="/docs/features/ai-resources/capacity/">Capacity</a> - Set resource-level capacity limits</li>
 <li class=""><a class="" href="/docs/features/ai-resources/">AI Resources Overview</a> - Return to AI Resources overview</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">AI Resources</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/ai-resources/fallback/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Automatic Fallback</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#basic-routing" class="table-of-contents__link toc-highlight">Basic Routing</a></li><li><a href="#routing-based-on-error-rate" class="table-of-contents__link toc-highlight">Routing Based on Error Rate</a></li><li><a href="#routing-based-on-tools-usage" class="table-of-contents__link toc-highlight">Routing Based on Tools Usage</a></li><li><a href="#available-routing-fields-and-expressions" class="table-of-contents__link toc-highlight">Available Routing Fields and Expressions</a><ul><li><a href="#token-based-conditions" class="table-of-contents__link toc-highlight">Token-Based Conditions</a></li><li><a href="#request-conditions" class="table-of-contents__link toc-highlight">Request Conditions</a></li><li><a href="#format-and-native-body-conditions" class="table-of-contents__link toc-highlight">Format and Native-Body Conditions</a></li><li><a href="#error-rate-function" class="table-of-contents__link toc-highlight">Error-Rate Function</a></li></ul></li><li><a href="#available-comparators" class="table-of-contents__link toc-highlight">Available Comparators</a></li><li><a href="#routing-actions" class="table-of-contents__link toc-highlight">Routing Actions</a></li><li><a href="#traffic-splitting" class="table-of-contents__link toc-highlight">Traffic Splitting</a></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-start-with-simple-conditions" class="table-of-contents__link toc-highlight">1. Start with Simple Conditions</a></li><li><a href="#2-test-routing-conditions" class="table-of-contents__link toc-highlight">2. Test Routing Conditions</a></li><li><a href="#3-use-traffic-splitting-for-rollouts" class="table-of-contents__link toc-highlight">3. Use Traffic Splitting for Rollouts</a></li><li><a href="#4-monitor-routing-decisions" class="table-of-contents__link toc-highlight">4. Monitor Routing Decisions</a></li></ul></li><li><a href="#troubleshooting" class="table-of-contents__link toc-highlight">Troubleshooting</a><ul><li><a href="#routing-not-working" class="table-of-contents__link toc-highlight">Routing Not Working</a></li><li><a href="#wrong-model-selected" class="table-of-contents__link toc-highlight">Wrong Model Selected</a></li></ul></li><li><a href="#next-steps" class="table-of-contents__link toc-highlight">Next Steps</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">AI Resources</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/ai-resources/fallback/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Automatic Fallback</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#basic-routing" class="table-of-contents__link toc-highlight">Basic Routing</a></li><li><a href="#routing-based-on-error-rate" class="table-of-contents__link toc-highlight">Routing Based on Error Rate</a></li><li><a href="#routing-based-on-tools-usage" class="table-of-contents__link toc-highlight">Routing Based on Tools Usage</a></li><li><a href="#available-routing-fields-and-expressions" class="table-of-contents__link toc-highlight">Available Routing Fields and Expressions</a><ul><li><a href="#token-based-conditions" class="table-of-contents__link toc-highlight">Token-Based Conditions</a></li><li><a href="#request-conditions-canonical-responses-shape" class="table-of-contents__link toc-highlight">Request Conditions (Canonical Responses Shape)</a></li><li><a href="#derived-convenience-variables" class="table-of-contents__link toc-highlight">Derived Convenience Variables</a></li><li><a href="#format-and-native-body-conditions" class="table-of-contents__link toc-highlight">Format and Native-Body Conditions</a></li><li><a href="#error-rate-function" class="table-of-contents__link toc-highlight">Error-Rate Function</a></li></ul></li><li><a href="#available-comparators" class="table-of-contents__link toc-highlight">Available Comparators</a></li><li><a href="#routing-actions" class="table-of-contents__link toc-highlight">Routing Actions</a></li><li><a href="#traffic-splitting" class="table-of-contents__link toc-highlight">Traffic Splitting</a></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-start-with-simple-conditions" class="table-of-contents__link toc-highlight">1. Start with Simple Conditions</a></li><li><a href="#2-test-routing-conditions" class="table-of-contents__link toc-highlight">2. Test Routing Conditions</a></li><li><a href="#3-use-traffic-splitting-for-rollouts" class="table-of-contents__link toc-highlight">3. Use Traffic Splitting for Rollouts</a></li><li><a href="#4-monitor-routing-decisions" class="table-of-contents__link toc-highlight">4. Monitor Routing Decisions</a></li></ul></li><li><a href="#troubleshooting" class="table-of-contents__link toc-highlight">Troubleshooting</a><ul><li><a href="#routing-not-working" class="table-of-contents__link toc-highlight">Routing Not Working</a></li><li><a href="#wrong-model-selected" class="table-of-contents__link toc-highlight">Wrong Model Selected</a></li></ul></li><li><a href="#next-steps" class="table-of-contents__link toc-highlight">Next Steps</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

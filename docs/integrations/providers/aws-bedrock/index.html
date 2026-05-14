@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-V1FCGNF0CJ"></script>
 <script>function gtag(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],gtag("js",new Date),gtag("config","G-V1FCGNF0CJ",{})</script><link rel="stylesheet" href="/assets/css/styles.54940ae3.css">
-<script src="/assets/js/runtime~main.e9587c5b.js" defer="defer"></script>
-<script src="/assets/js/main.0a39a3e9.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.2fa3c6f0.js" defer="defer"></script>
+<script src="/assets/js/main.f8d245a4.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -63,9 +63,19 @@ gateway maps them onto Converse-native <code>cachePoint</code> blocks inside
 </blockquote>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="models">Models<a href="#models" class="hash-link" aria-label="Direct link to Models" title="Direct link to Models" translate="no">​</a></h2>
 <p>Any model id Bedrock exposes in your region — pass the full Bedrock
-model id (<code>anthropic.claude-haiku-4-5-v1:0</code>,
-<code>amazon.nova-pro-v1:0</code>, <code>meta.llama3-1-405b-instruct-v1:0</code>, …) or a
-cross-region inference profile id.</p>
+model id or a cross-region inference profile id. Examples that are
+exercised by the integration suite:</p>
+<ul>
+<li class=""><code>us.anthropic.claude-haiku-4-5-20251001-v1:0</code> (default for new
+connections; cross-region inference profile)</li>
+<li class=""><code>us.anthropic.claude-sonnet-4-5-20250929-v1:0</code></li>
+<li class=""><code>amazon.nova-pro-v1:0</code></li>
+<li class=""><code>meta.llama3-1-405b-instruct-v1:0</code></li>
+<li class=""><code>mistral.mistral-large-2407-v1:0</code></li>
+</ul>
+<p>For Claude-specific features the Converse shape can&#x27;t express
+(<code>cache_control</code>, extended <code>thinking</code>, server tools), use
+<a class="" href="/docs/integrations/providers/aws-bedrock-invoke/"><code>aws-bedrock-invoke</code></a> instead.</p>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="audit-row-fields-specific-to-bedrock-converse">Audit row fields specific to Bedrock Converse<a href="#audit-row-fields-specific-to-bedrock-converse" class="hash-link" aria-label="Direct link to Audit row fields specific to Bedrock Converse" title="Direct link to Audit row fields specific to Bedrock Converse" translate="no">​</a></h2>
 <p>T24 surfaces Bedrock&#x27;s observability fields onto the audit row via
 the response headers stream:</p>

@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-V1FCGNF0CJ"></script>
 <script>function gtag(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],gtag("js",new Date),gtag("config","G-V1FCGNF0CJ",{})</script><link rel="stylesheet" href="/assets/css/styles.54940ae3.css">
-<script src="/assets/js/runtime~main.e9587c5b.js" defer="defer"></script>
-<script src="/assets/js/main.0a39a3e9.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.2fa3c6f0.js" defer="defer"></script>
+<script src="/assets/js/main.f8d245a4.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -57,11 +57,15 @@ limit globally across the whole resource.</p>
 <p>When <code>enforceCapacity</code> is <code>true</code>:</p>
 <ul>
 <li class="">Resource-level capacity is added to the gate&#x27;s check set
-alongside the connection&#x27;s own capacity (and any per-API-key
-capacity from the calling key).</li>
+alongside the connection&#x27;s own capacity (always enforced when
+the connection has <code>enabled</code> entries) and any per-API-key
+capacity from the calling key (added when the key itself has
+<code>enforceCapacity</code> set).</li>
 <li class="">Requests exceeding any enforced limit are rejected with
 <code>429 Too Many Requests</code> and an <code>openai_compatible_error.code</code>
-of <code>resource_exhausted</code>.</li>
+of <code>resource_exhausted</code>. The error message names the
+violating layer (<code>AI Connection</code>, <code>AI Resource</code>, or <code>API Key</code>),
+the period, and whether requests or tokens tripped the cap.</li>
 <li class="">Useful for:<!-- -->
 <ul>
 <li class="">Limiting usage per resource independently</li>
@@ -78,23 +82,49 @@ is checked.</li>
 <li class="">Useful for resources that should share connection capacity freely.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="how-resource-capacity-works">How Resource Capacity Works<a href="#how-resource-capacity-works" class="hash-link" aria-label="Direct link to How Resource Capacity Works" title="Direct link to How Resource Capacity Works" translate="no">​</a></h2>
-<p>The capacity gate checks all enabled limits in a single pass:</p>
+<p>The capacity gate runs <strong>before</strong> the provider call on every
+attempt (primary and each fallback leg) and checks all enabled
+limits in a single pass:</p>
 <ol>
 <li class=""><strong>Capacity check</strong> — connection capacity is always evaluated;
 resource capacity is added when <code>enforceCapacity</code> is <code>true</code>;
 API-key capacity is added when the calling key has
-<code>enforceCapacity</code> set. Any limit exceeded rejects the request
-with <code>429 Too Many Requests</code>.</li>
+<code>enforceCapacity</code> set. Any limit exceeded rejects the attempt
+with <code>429 Too Many Requests</code> and
+<code>openai_compatible_error.code = resource_exhausted</code>.</li>
 <li class=""><strong>Prioritization gate</strong> (if a pool definition includes the
-resource and the connection has a minute capacity configured) —
-the adaptive-token-scaling prioritization algorithm decides
-whether the request proceeds given pool weights and current
-usage. See <a class="" href="/docs/features/prioritization/">Prioritization</a>.</li>
+resource and the connection has a <code>minute</code> capacity entry) —
+the adaptive-token-scaling algorithm decides whether the
+request proceeds given pool weights and current usage. A
+denial here uses
+<code>openai_compatible_error.code = prioritization_gate_denied</code>.
+See <a class="" href="/docs/features/prioritization/">Prioritization</a>.</li>
 </ol>
 <p>If the gate denies on a given leg, the gateway treats the denial
-like any other failure and tries the next fallback model — so
-configure your fallback chain across different connections to get
-real failover when one connection is exhausted.</p>
+like any other failure and tries the next entry in the fallback
+chain — so configure fallbacks across different connections (or
+resources with different limits) to get real failover when one
+connection is exhausted. See <a class="" href="/docs/features/ai-resources/fallback/">Fallback</a>.</p>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="state-storage-redis-cluster">State storage (Redis cluster)<a href="#state-storage-redis-cluster" class="hash-link" aria-label="Direct link to State storage (Redis cluster)" title="Direct link to State storage (Redis cluster)" translate="no">​</a></h3>
+<p>Counters are kept in Redis under hash-tagged keys of the form
+<code>capacity:{workspaceId:environmentId:resourceId:connectionId}:resource-usage:&lt;period&gt;:requests</code>
+and <code>…:tokens</code>. The hash tag (<code>{…}</code>) co-locates every counter for
+a given resource×connection pair on a single Redis cluster slot,
+so the multi-key <code>MULTI</code>/<code>EXPIRE</code> pipeline used during the gate
+stays inside one node. TTLs are set to the seconds remaining in
+the current period, so counters auto-expire at the period
+boundary (no scheduled reset).</p>
+<p><code>source-ip</code>-dimensioned entries get an additional
+<code>:source-ip:&lt;ip&gt;:</code> segment in the key, keeping per-IP counters
+separate from the global ones.</p>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="token-accounting">Token accounting<a href="#token-accounting" class="hash-link" aria-label="Direct link to Token accounting" title="Direct link to Token accounting" translate="no">​</a></h3>
+<p>The gate increments the <code>tokens</code> counter with the <strong>estimated
+request tokens</strong> before dispatch (so a denied attempt still
+consumes the would-be tokens for the duration of the period). On
+a successful provider response, <code>completion_tokens</code> from the
+upstream usage payload is added on top via a post-completion
+increment, so TPM caps reflect the full input+output cost. The
+<code>requests</code> counter is incremented once per attempt.</p>
 <h3 class="anchor anchorTargetStickyNavbar_XtlD" id="example-scenario">Example Scenario<a href="#example-scenario" class="hash-link" aria-label="Direct link to Example Scenario" title="Direct link to Example Scenario" translate="no">​</a></h3>
 <p>Consider a connection with 100,000 TPM capacity and two resources:</p>
 <p><strong>Connection Configuration:</strong></p>
@@ -186,16 +216,31 @@ single pass — first violation wins):</p>
 <ul>
 <li class=""><strong>Scope</strong>: Per connection (shared across all resources)</li>
 <li class=""><strong>Enforcement</strong>: Always enforced when capacity entries are
-configured + <code>enabled</code> on the connection</li>
+configured + <code>enabled</code> on the connection. See
+<a class="" href="/docs/features/ai-connections/">AI Connections</a>.</li>
 <li class=""><strong>Use Case</strong>: Control total usage across all resources</li>
-<li class=""><strong>Example</strong>: Limit OpenAI connection to 100,000 TPM total</li>
+<li class=""><strong>Example</strong>: Limit a connection to 100,000 TPM total</li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="api-key-capacity">API Key Capacity<a href="#api-key-capacity" class="hash-link" aria-label="Direct link to API Key Capacity" title="Direct link to API Key Capacity" translate="no">​</a></h3>
+<ul>
+<li class=""><strong>Scope</strong>: Per API key (shared across resources the key can
+reach)</li>
+<li class=""><strong>Enforcement</strong>: Optional — only when the API key itself has
+<code>enforceCapacity: true</code></li>
+<li class=""><strong>Use Case</strong>: Per-tenant or per-integration limits</li>
+<li class=""><strong>Example</strong>: Limit a partner key to 1,000 RPM regardless of
+which resource it hits</li>
 </ul>
 <h3 class="anchor anchorTargetStickyNavbar_XtlD" id="combined-usage">Combined Usage<a href="#combined-usage" class="hash-link" aria-label="Direct link to Combined Usage" title="Direct link to Combined Usage" translate="no">​</a></h3>
-<p>Both capacity types work together:</p>
+<p>All three layers work together:</p>
 <ol>
 <li class="">Resource capacity limits usage per resource</li>
-<li class="">Connection capacity limits total usage across all resources</li>
-<li class="">Requests must pass both checks to proceed</li>
+<li class="">Connection capacity limits total usage across all resources on
+that connection</li>
+<li class="">API-key capacity limits the calling key&#x27;s footprint across the
+resources it can reach</li>
+<li class="">Requests must pass every enabled check to proceed; the first
+violation wins and the attempt is rejected with <code>429</code></li>
 </ol>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="troubleshooting">Troubleshooting<a href="#troubleshooting" class="hash-link" aria-label="Direct link to Troubleshooting" title="Direct link to Troubleshooting" translate="no">​</a></h2>
 <h3 class="anchor anchorTargetStickyNavbar_XtlD" id="capacity-limits-too-restrictive">Capacity Limits Too Restrictive<a href="#capacity-limits-too-restrictive" class="hash-link" aria-label="Direct link to Capacity Limits Too Restrictive" title="Direct link to Capacity Limits Too Restrictive" translate="no">​</a></h3>
@@ -225,6 +270,6 @@ configured + <code>enabled</code> on the connection</li>
 <li class=""><a class="" href="/docs/features/ai-resources/fallback/">Fallback</a> - Configure automatic fallback</li>
 <li class=""><a class="" href="/docs/features/ai-resources/">AI Resources Overview</a> - Return to AI Resources overview</li>
 <li class=""><a class="" href="/docs/features/prioritization/">Prioritization</a> - Understand capacity prioritization</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/fallback/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Automatic Fallback</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/playground/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Playground</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#configuring-resource-capacity" class="table-of-contents__link toc-highlight">Configuring Resource Capacity</a><ul><li><a href="#capacity-periods" class="table-of-contents__link toc-highlight">Capacity Periods</a></li><li><a href="#per-source-ip-capacity" class="table-of-contents__link toc-highlight">Per-Source-IP Capacity</a></li><li><a href="#capacity-enforcement" class="table-of-contents__link toc-highlight">Capacity Enforcement</a></li></ul></li><li><a href="#how-resource-capacity-works" class="table-of-contents__link toc-highlight">How Resource Capacity Works</a><ul><li><a href="#example-scenario" class="table-of-contents__link toc-highlight">Example Scenario</a></li></ul></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-set-realistic-limits" class="table-of-contents__link toc-highlight">1. Set Realistic Limits</a></li><li><a href="#2-use-multiple-periods" class="table-of-contents__link toc-highlight">2. Use Multiple Periods</a></li><li><a href="#3-balance-resource-and-connection-capacity" class="table-of-contents__link toc-highlight">3. Balance Resource and Connection Capacity</a></li><li><a href="#4-monitor-capacity-usage" class="table-of-contents__link toc-highlight">4. Monitor Capacity Usage</a></li><li><a href="#5-use-with-prioritization" class="table-of-contents__link toc-highlight">5. Use with Prioritization</a></li></ul></li><li><a href="#capacity-vs-connection-capacity" class="table-of-contents__link toc-highlight">Capacity vs. Connection Capacity</a><ul><li><a href="#resource-capacity" class="table-of-contents__link toc-highlight">Resource Capacity</a></li><li><a href="#connection-capacity" class="table-of-contents__link toc-highlight">Connection Capacity</a></li><li><a href="#combined-usage" class="table-of-contents__link toc-highlight">Combined Usage</a></li></ul></li><li><a href="#troubleshooting" class="table-of-contents__link toc-highlight">Troubleshooting</a><ul><li><a href="#capacity-limits-too-restrictive" class="table-of-contents__link toc-highlight">Capacity Limits Too Restrictive</a></li><li><a href="#capacity-not-being-enforced" class="table-of-contents__link toc-highlight">Capacity Not Being Enforced</a></li><li><a href="#unexpected-rejections" class="table-of-contents__link toc-highlight">Unexpected Rejections</a></li></ul></li><li><a href="#next-steps" class="table-of-contents__link toc-highlight">Next Steps</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/fallback/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">Automatic Fallback</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/playground/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Playground</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#configuring-resource-capacity" class="table-of-contents__link toc-highlight">Configuring Resource Capacity</a><ul><li><a href="#capacity-periods" class="table-of-contents__link toc-highlight">Capacity Periods</a></li><li><a href="#per-source-ip-capacity" class="table-of-contents__link toc-highlight">Per-Source-IP Capacity</a></li><li><a href="#capacity-enforcement" class="table-of-contents__link toc-highlight">Capacity Enforcement</a></li></ul></li><li><a href="#how-resource-capacity-works" class="table-of-contents__link toc-highlight">How Resource Capacity Works</a><ul><li><a href="#state-storage-redis-cluster" class="table-of-contents__link toc-highlight">State storage (Redis cluster)</a></li><li><a href="#token-accounting" class="table-of-contents__link toc-highlight">Token accounting</a></li><li><a href="#example-scenario" class="table-of-contents__link toc-highlight">Example Scenario</a></li></ul></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-set-realistic-limits" class="table-of-contents__link toc-highlight">1. Set Realistic Limits</a></li><li><a href="#2-use-multiple-periods" class="table-of-contents__link toc-highlight">2. Use Multiple Periods</a></li><li><a href="#3-balance-resource-and-connection-capacity" class="table-of-contents__link toc-highlight">3. Balance Resource and Connection Capacity</a></li><li><a href="#4-monitor-capacity-usage" class="table-of-contents__link toc-highlight">4. Monitor Capacity Usage</a></li><li><a href="#5-use-with-prioritization" class="table-of-contents__link toc-highlight">5. Use with Prioritization</a></li></ul></li><li><a href="#capacity-vs-connection-capacity" class="table-of-contents__link toc-highlight">Capacity vs. Connection Capacity</a><ul><li><a href="#resource-capacity" class="table-of-contents__link toc-highlight">Resource Capacity</a></li><li><a href="#connection-capacity" class="table-of-contents__link toc-highlight">Connection Capacity</a></li><li><a href="#api-key-capacity" class="table-of-contents__link toc-highlight">API Key Capacity</a></li><li><a href="#combined-usage" class="table-of-contents__link toc-highlight">Combined Usage</a></li></ul></li><li><a href="#troubleshooting" class="table-of-contents__link toc-highlight">Troubleshooting</a><ul><li><a href="#capacity-limits-too-restrictive" class="table-of-contents__link toc-highlight">Capacity Limits Too Restrictive</a></li><li><a href="#capacity-not-being-enforced" class="table-of-contents__link toc-highlight">Capacity Not Being Enforced</a></li><li><a href="#unexpected-rejections" class="table-of-contents__link toc-highlight">Unexpected Rejections</a></li></ul></li><li><a href="#next-steps" class="table-of-contents__link toc-highlight">Next Steps</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>

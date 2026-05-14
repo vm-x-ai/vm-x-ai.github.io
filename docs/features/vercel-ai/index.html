@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-V1FCGNF0CJ"></script>
 <script>function gtag(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],gtag("js",new Date),gtag("config","G-V1FCGNF0CJ",{})</script><link rel="stylesheet" href="/assets/css/styles.54940ae3.css">
-<script src="/assets/js/runtime~main.e9587c5b.js" defer="defer"></script>
-<script src="/assets/js/main.0a39a3e9.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.2fa3c6f0.js" defer="defer"></script>
+<script src="/assets/js/main.f8d245a4.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -127,6 +127,9 @@ It includes one file per scenario:</p>
 <li class=""><code>object.ts</code> — <code>generateObject</code> with a Zod schema</li>
 <li class=""><code>vmx-envelope.ts</code> — custom <code>fetch</code> wrapper that injects <code>correlationId</code>
 / <code>metadata</code> / <code>timeoutMs</code> into the request body</li>
+<li class=""><code>config.ts</code> — shared helper that loads <code>.env.local</code> and computes the
+<code>…/{ws}/{env}</code> and <code>…/{ws}/{env}/anthropic</code> base URLs reused by every
+scenario file above</li>
 </ul>
 <p>To get started:</p>
 <div class="language-bash codeBlockContainer_xz7v theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_Yy4o"><pre tabindex="0" class="prism-code language-bash codeBlock_jzEt thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_vnYC"><span class="token-line" style="color:#393A34"><span class="token plain">pnpm exec nx run vercel-ai-example:setup          # provision workspace + API key</span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">pnpm exec nx run vercel-ai-example:openai-chat    # run a scenario</span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">pnpm exec nx run vercel-ai-example:tools          # multi-step tool use</span><br></span></code></pre></div></div>
