@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://www.googletagmanager.com">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-V1FCGNF0CJ"></script>
 <script>function gtag(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],gtag("js",new Date),gtag("config","G-V1FCGNF0CJ",{})</script><link rel="stylesheet" href="/assets/css/styles.54940ae3.css">
-<script src="/assets/js/runtime~main.2fa3c6f0.js" defer="defer"></script>
-<script src="/assets/js/main.f8d245a4.js" defer="defer"></script>
+<script src="/assets/js/runtime~main.6d589768.js" defer="defer"></script>
+<script src="/assets/js/main.19102a61.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
 <svg style="display: none;"><defs>
@@ -62,6 +62,50 @@ before routing evaluates conditions.</p>
 <li class="">Optimizes costs by only using premium models when needed</li>
 </ul>
 <p><img decoding="async" loading="lazy" alt="Tools-Based Routing Configuration" src="/assets/images/ai-resource-dynamic-has-tools-fce87bef8116df3d829ffca8c467ded1.png" width="1662" height="518" class="img_X5yv"></p>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="routing-based-on-metadata">Routing Based on Metadata<a href="#routing-based-on-metadata" class="hash-link" aria-label="Direct link to Routing Based on Metadata" title="Direct link to Routing Based on Metadata" translate="no">​</a></h2>
+<p>Route based on per-request metadata stamped by the caller. Useful for routing premium tenants to a different model, sending a specific team&#x27;s traffic through a cheaper one, or isolating a noisy customer onto its own connection.</p>
+<p><strong>Use Case</strong>: Per-tenant / per-user / per-team routing without forking the upstream caller code — just attach a <code>userId</code>, <code>team</code>, <code>tenantId</code> (or whatever you like) on the request and let the routing engine pick the right model.</p>
+<p><strong>How metadata reaches the gateway</strong>:</p>
+<ul>
+<li class="">Body envelope: <code>{ vmx: { metadata: { team: &quot;growth&quot; } }, … }</code></li>
+<li class="">Headers: <code>x-vmx-metadata-team: growth</code> (one header per key)</li>
+<li class="">Header and body keys are unioned; body wins on collision.</li>
+</ul>
+<p><strong>How the rule works</strong>: Pick the <strong>&quot;Metadata field equals ...&quot;</strong> preset in the rule selector. The editor renders two suggesting inputs — a <strong>Field</strong> picker (autocomplete sourced from metadata keys observed on recent audits) and a <strong>Value</strong> picker (autocomplete sourced from values observed for the chosen field). The chosen field is encoded into the saved rule as <code>metadata[&#x27;&lt;field&gt;&#x27;]</code>, so the engine reads <code>payload.vmx.metadata[&lt;field&gt;]</code> at request time.</p>
+<p><strong>Example template</strong> (advanced mode, equivalent to the preset):</p>
+<div class="language-ejs codeBlockContainer_xz7v theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_Yy4o"><pre tabindex="0" class="prism-code language-ejs codeBlock_jzEt thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_vnYC"><span class="token-line" style="color:#393A34"><span class="token plain">metadata[&#x27;team&#x27;]</span><br></span></code></pre></div></div>
+<p>Comparator: <code>EQUAL</code>, value: <code>growth</code>. The rule fires when <code>request.vmx.metadata.team === &#x27;growth&#x27;</code>. Both <code>metadata.team</code> and <code>request.metadata.team</code> resolve to the same value if you&#x27;d rather write the path manually.</p>
+<p><strong>Benefits</strong>:</p>
+<ul>
+<li class="">No upstream code change beyond stamping the metadata field once.</li>
+<li class="">Field + value pickers learn from the audit history, so by the second send you no longer have to type from memory.</li>
+<li class="">Works through every public endpoint (Chat Completions / Responses / Anthropic Messages) since the envelope rides on top of all three.</li>
+</ul>
+<h2 class="anchor anchorTargetStickyNavbar_XtlD" id="routing-based-on-capacity-usage">Routing Based on Capacity Usage<a href="#routing-based-on-capacity-usage" class="hash-link" aria-label="Direct link to Routing Based on Capacity Usage" title="Direct link to Routing Based on Capacity Usage" translate="no">​</a></h2>
+<p>Route away from a saturated connection <strong>before</strong> it 429s. The <code>capacityUsage()</code> helper exposes live request / token usage as a percentage of the tightest configured (or auto-discovered) limit, so a rule can flip traffic to a backup model when the primary is e.g. 80% full.</p>
+<p><strong>Use Case</strong>: Smooth-out provider rate limits without leaning entirely on retries / fallback. Particularly useful when one provider&#x27;s minute-bucket cap is materially lower than the alternative&#x27;s, or when you have an OpenAI auto-discovered limit and a Gemini connection with massive headroom.</p>
+<p><strong>Four built-in presets</strong> (pick whichever axis matters):</p>
+<ul>
+<li class=""><strong>Token usage (last minute) is greater than ...</strong> — fires when <code>tokensUsagePercent &gt; N</code>.</li>
+<li class=""><strong>Request usage (last minute) is greater than ...</strong> — same for the request-count axis.</li>
+<li class=""><strong>Remaining tokens (this minute) less than ...</strong> — absolute headroom on tokens.</li>
+<li class=""><strong>Remaining requests (this minute) less than ...</strong> — absolute headroom on requests.</li>
+</ul>
+<p><strong>How it works</strong>: The helper unions configured caps (Connection + Resource + API Key) with the connection&#x27;s auto-discovered limits (refreshed off provider <code>x-ratelimit-limit-*</code> response headers, dropped if older than 7 days). It picks the cap closest to saturation on each axis and returns its <code>requestsUsagePercent</code> / <code>tokensUsagePercent</code> / <code>remainingRequests</code> / <code>remainingTokens</code>. Source-IP-dimensioned and metadata-dimensioned caps are read against their per-bucket counter, so per-caller usage drives the rule when the cap is configured per-caller.</p>
+<p><strong>Example template</strong> (advanced mode):</p>
+<div class="language-ejs codeBlockContainer_xz7v theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_Yy4o"><pre tabindex="0" class="prism-code language-ejs codeBlock_jzEt thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_vnYC"><span class="token-line" style="color:#393A34"><span class="token plain">&lt;% return (await capacityUsage(&quot;minute&quot;))?.tokensUsagePercent %&gt;</span><br></span></code></pre></div></div>
+<p>Comparator: <code>GREATER_THAN</code>, value: <code>80</code>. Fires when the connection&#x27;s tightest token limit is at 80%+. The helper takes optional <code>(period, connectionId, model)</code> arguments — defaults to the resource&#x27;s primary connection and the current minute.</p>
+<p><strong>Benefits</strong>:</p>
+<ul>
+<li class="">Proactive load shedding — route away from saturation <strong>before</strong> the 429.</li>
+<li class="">Works with any cap you&#x27;ve configured (Connection / Resource / API Key) plus the provider&#x27;s own auto-discovered rate limit.</li>
+<li class="">Multi-axis rules (&quot;if tokens &gt; 80% OR requests &gt; 80%&quot;) only pay one Redis read per probe — the engine memoises per <code>(period, connection, model)</code>.</li>
+</ul>
+<p><strong>Limitations</strong>:</p>
+<ul>
+<li class="">When no source defines a cap on an axis, the corresponding <code>*UsagePercent</code> is <code>null</code> — the rule&#x27;s comparator drops to <code>false</code>, so an unlimited-axis check is naturally inert. If you rely on <code>capacityUsage</code>, make sure the underlying cap is configured.</li>
+<li class=""><code>requestTokens</code> from the in-flight request is not folded in by default. If you want a rule to fire on the request that would push usage <strong>over</strong> the line (rather than the one after), pull <code>tokens.input</code> into the comparator: <code>&lt;% return (await capacityUsage()).totalTokens + tokens.input %&gt;</code> against a numeric threshold.</li>
+</ul>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="available-routing-fields-and-expressions">Available Routing Fields and Expressions<a href="#available-routing-fields-and-expressions" class="hash-link" aria-label="Direct link to Available Routing Fields and Expressions" title="Direct link to Available Routing Fields and Expressions" translate="no">​</a></h2>
 <p>Routing conditions evaluate against a small set of request-shaped
 variables. The <strong>canonical shape is OpenAI Responses</strong> — Chat
@@ -130,6 +174,17 @@ Anthropic Messages body.</li>
 <p>These fields are evaluated through EJS, so they appear in advanced-
 mode routing expressions like
 <code>&lt;%= request.format === &#x27;anthropic&#x27; &amp;&amp; request.nativeBody.thinking %&gt;</code>.</p>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="metadata-variables">Metadata Variables<a href="#metadata-variables" class="hash-link" aria-label="Direct link to Metadata Variables" title="Direct link to Metadata Variables" translate="no">​</a></h3>
+<p>Per-request metadata stamped by the caller (via <code>vmx.metadata</code> body envelope or <code>x-vmx-metadata-&lt;key&gt;</code> headers) is exposed at two paths — same object reference, so they always agree:</p>
+<ul>
+<li class=""><strong><code>metadata[&#x27;&lt;key&gt;&#x27;]</code></strong> (top-level) — matches the way <code>tokens.input</code> reads.</li>
+<li class=""><strong><code>request.metadata[&#x27;&lt;key&gt;&#x27;]</code></strong> — matches the way <code>request.lastMessage</code> reads.</li>
+</ul>
+<p>Use bracket notation when the key may contain a dot or special character; plain dot syntax (<code>metadata.userId</code>) is fine when the key is a simple identifier. Saved rules from earlier versions that used optional chaining (<code>request.metadata?.[&#x27;userId&#x27;]</code>) keep working — the engine normalises <code>?.</code> to <code>.</code> before path lookup.</p>
+<ul>
+<li class="">Example: Route premium tenants — <code>metadata[&#x27;tier&#x27;] EQUAL &quot;premium&quot;</code>.</li>
+<li class="">Example: Per-team routing — <code>metadata[&#x27;team&#x27;] EQUAL &quot;growth&quot;</code>.</li>
+</ul>
 <h3 class="anchor anchorTargetStickyNavbar_XtlD" id="error-rate-function">Error-Rate Function<a href="#error-rate-function" class="hash-link" aria-label="Direct link to Error-Rate Function" title="Direct link to Error-Rate Function" translate="no">​</a></h3>
 <ul>
 <li class=""><strong><code>errorRate(windowMinutes)</code></strong> — async function returning the
@@ -142,6 +197,26 @@ comparators (<code>GREATER_THAN</code>, <code>LESS_THAN</code>, …).<!-- -->
 (more than 10% errors in the last 5 minutes).</li>
 </ul>
 </li>
+</ul>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="capacity-usage-function">Capacity-Usage Function<a href="#capacity-usage-function" class="hash-link" aria-label="Direct link to Capacity-Usage Function" title="Direct link to Capacity-Usage Function" translate="no">​</a></h3>
+<ul>
+<li class=""><strong><code>capacityUsage(period, aiConnectionId?, model?)</code></strong> — async function returning a live snapshot of capacity usage for a <code>(connection, model, period)</code> triple. Defaults to the resource&#x27;s primary connection/model and <code>&quot;minute&quot;</code> period. Returns an object with these fields (every derived field is <code>null</code> when the corresponding limit is unconfigured):<!-- -->
+<ul>
+<li class=""><code>totalRequests</code>, <code>totalTokens</code> — absolute counts from the limiting cap&#x27;s counter.</li>
+<li class=""><code>requestsLimit</code>, <code>tokensLimit</code> — the tightest applicable limit across configured (Connection + Resource + API Key) and auto-discovered sources.</li>
+<li class=""><code>requestsLimitSource</code>, <code>tokensLimitSource</code> — <code>&#x27;connection&#x27; | &#x27;resource&#x27; | &#x27;api-key&#x27; | &#x27;discovered&#x27;</code> so advanced rules can special-case discovered limits.</li>
+<li class=""><code>remainingRequests</code>, <code>remainingTokens</code> — <code>limit − total</code>, never below 0.</li>
+<li class=""><code>requestsUsagePercent</code>, <code>tokensUsagePercent</code> — <code>0..100</code>, clamped.</li>
+<li class=""><code>remainingSeconds</code> — until the period rolls over.</li>
+</ul>
+</li>
+<li class="">Pair with the EJS template form, since the result is an object:<!-- -->
+<ul>
+<li class=""><code>&lt;% return (await capacityUsage(&quot;minute&quot;))?.tokensUsagePercent %&gt;</code> GREATER_THAN 80</li>
+<li class=""><code>&lt;% return (await capacityUsage()).remainingRequests %&gt;</code> LESS_THAN 5</li>
+</ul>
+</li>
+<li class="">Memoised per <code>(period, connection, model)</code> within a single request, so multi-group rules don&#x27;t multiply Redis reads.</li>
 </ul>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="available-comparators">Available Comparators<a href="#available-comparators" class="hash-link" aria-label="Direct link to Available Comparators" title="Direct link to Available Comparators" translate="no">​</a></h2>
 <p>The full set, all of which are valid on numeric and string fields
@@ -203,6 +278,8 @@ percentage. If no route matches, the resource&#x27;s primary model is used.</p>
 <li class="">Token-based routing (small vs. large requests)</li>
 <li class="">Tool-based routing (requests with/without tools)</li>
 <li class="">Error rate-based routing (fallback when errors are high)</li>
+<li class="">Metadata-based routing (per-tenant, per-team, per-user)</li>
+<li class="">Capacity-usage routing (route away from saturated connections proactively)</li>
 </ul>
 <h3 class="anchor anchorTargetStickyNavbar_XtlD" id="2-test-routing-conditions">2. Test Routing Conditions<a href="#2-test-routing-conditions" class="hash-link" aria-label="Direct link to 2. Test Routing Conditions" title="Direct link to 2. Test Routing Conditions" translate="no">​</a></h3>
 <p>Before deploying:</p>
@@ -242,11 +319,23 @@ percentage. If no route matches, the resource&#x27;s primary model is used.</p>
 <li class=""><strong>Review Traffic Splitting</strong>: If using traffic splitting, verify the percentage is set correctly</li>
 <li class=""><strong>Check Connection Availability</strong>: Ensure the selected connection and model are available and configured correctly</li>
 </ol>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="metadata-rule-never-fires">Metadata Rule Never Fires<a href="#metadata-rule-never-fires" class="hash-link" aria-label="Direct link to Metadata Rule Never Fires" title="Direct link to Metadata Rule Never Fires" translate="no">​</a></h3>
+<ol>
+<li class=""><strong>Verify the metadata reached the gateway</strong>: Open the audit row for a recent request — the <code>metadata</code> column should contain your key. If it doesn&#x27;t, the caller isn&#x27;t stamping it.</li>
+<li class=""><strong>Check the field name matches exactly</strong>: Metadata keys are case-sensitive. <code>userId</code> and <code>user_id</code> are different keys.</li>
+<li class=""><strong>Inspect the saved expression</strong>: It should look like <code>metadata[&#x27;&lt;your-field&gt;&#x27;]</code> (or the legacy <code>request.metadata?.[&#x27;&lt;your-field&gt;&#x27;]</code>, which still works). Anything else and the rule probably got hand-edited; re-pick &quot;Metadata field equals ...&quot; from the rule selector.</li>
+</ol>
+<h3 class="anchor anchorTargetStickyNavbar_XtlD" id="capacity-usage-rule-never-fires">Capacity-Usage Rule Never Fires<a href="#capacity-usage-rule-never-fires" class="hash-link" aria-label="Direct link to Capacity-Usage Rule Never Fires" title="Direct link to Capacity-Usage Rule Never Fires" translate="no">​</a></h3>
+<ol>
+<li class=""><strong>Confirm the underlying cap is configured</strong>: <code>capacityUsage()</code> returns <code>null</code> percents when no cap is set on that axis. Add a request or token cap (Connection / Resource / API Key) or rely on the provider&#x27;s auto-discovered limit (only populated after the first successful call).</li>
+<li class=""><strong>Check the period</strong>: The default is <code>&quot;minute&quot;</code>. If you&#x27;re testing manually, you have ≤60 seconds before the bucket rolls over and resets the counter.</li>
+<li class=""><strong>Inspect the limiting source</strong>: <code>(await capacityUsage()).requestsLimitSource</code> tells you which cap the helper is reading. If it&#x27;s <code>&#x27;discovered&#x27;</code> and you just changed the configured cap, the discovered limit is still tighter.</li>
+</ol>
 <h2 class="anchor anchorTargetStickyNavbar_XtlD" id="next-steps">Next Steps<a href="#next-steps" class="hash-link" aria-label="Direct link to Next Steps" title="Direct link to Next Steps" translate="no">​</a></h2>
 <ul>
 <li class=""><a class="" href="/docs/features/ai-resources/fallback/">Fallback</a> - Configure automatic fallback</li>
-<li class=""><a class="" href="/docs/features/ai-resources/capacity/">Capacity</a> - Set resource-level capacity limits</li>
+<li class=""><a class="" href="/docs/features/ai-resources/capacity/">Capacity</a> - Set resource-level capacity limits, including <code>source-ip</code> and <code>metadata</code> dimensions that drive per-caller / per-tenant rate limits</li>
 <li class=""><a class="" href="/docs/features/ai-resources/">AI Resources Overview</a> - Return to AI Resources overview</li>
-</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">AI Resources</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/ai-resources/fallback/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Automatic Fallback</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#basic-routing" class="table-of-contents__link toc-highlight">Basic Routing</a></li><li><a href="#routing-based-on-error-rate" class="table-of-contents__link toc-highlight">Routing Based on Error Rate</a></li><li><a href="#routing-based-on-tools-usage" class="table-of-contents__link toc-highlight">Routing Based on Tools Usage</a></li><li><a href="#available-routing-fields-and-expressions" class="table-of-contents__link toc-highlight">Available Routing Fields and Expressions</a><ul><li><a href="#token-based-conditions" class="table-of-contents__link toc-highlight">Token-Based Conditions</a></li><li><a href="#request-conditions-canonical-responses-shape" class="table-of-contents__link toc-highlight">Request Conditions (Canonical Responses Shape)</a></li><li><a href="#derived-convenience-variables" class="table-of-contents__link toc-highlight">Derived Convenience Variables</a></li><li><a href="#format-and-native-body-conditions" class="table-of-contents__link toc-highlight">Format and Native-Body Conditions</a></li><li><a href="#error-rate-function" class="table-of-contents__link toc-highlight">Error-Rate Function</a></li></ul></li><li><a href="#available-comparators" class="table-of-contents__link toc-highlight">Available Comparators</a></li><li><a href="#routing-actions" class="table-of-contents__link toc-highlight">Routing Actions</a></li><li><a href="#traffic-splitting" class="table-of-contents__link toc-highlight">Traffic Splitting</a></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-start-with-simple-conditions" class="table-of-contents__link toc-highlight">1. Start with Simple Conditions</a></li><li><a href="#2-test-routing-conditions" class="table-of-contents__link toc-highlight">2. Test Routing Conditions</a></li><li><a href="#3-use-traffic-splitting-for-rollouts" class="table-of-contents__link toc-highlight">3. Use Traffic Splitting for Rollouts</a></li><li><a href="#4-monitor-routing-decisions" class="table-of-contents__link toc-highlight">4. Monitor Routing Decisions</a></li></ul></li><li><a href="#troubleshooting" class="table-of-contents__link toc-highlight">Troubleshooting</a><ul><li><a href="#routing-not-working" class="table-of-contents__link toc-highlight">Routing Not Working</a></li><li><a href="#wrong-model-selected" class="table-of-contents__link toc-highlight">Wrong Model Selected</a></li></ul></li><li><a href="#next-steps" class="table-of-contents__link toc-highlight">Next Steps</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
+</ul></div></article><nav class="docusaurus-mt-lg pagination-nav" aria-label="Docs pages"><a class="pagination-nav__link pagination-nav__link--prev" href="/docs/features/ai-resources/"><div class="pagination-nav__sublabel">Previous</div><div class="pagination-nav__label">AI Resources</div></a><a class="pagination-nav__link pagination-nav__link--next" href="/docs/features/ai-resources/fallback/"><div class="pagination-nav__sublabel">Next</div><div class="pagination-nav__label">Automatic Fallback</div></a></nav></div></div><div class="col col--3"><div class="tableOfContents_OOHs thin-scrollbar theme-doc-toc-desktop"><ul class="table-of-contents table-of-contents__left-border"><li><a href="#overview" class="table-of-contents__link toc-highlight">Overview</a></li><li><a href="#basic-routing" class="table-of-contents__link toc-highlight">Basic Routing</a></li><li><a href="#routing-based-on-error-rate" class="table-of-contents__link toc-highlight">Routing Based on Error Rate</a></li><li><a href="#routing-based-on-tools-usage" class="table-of-contents__link toc-highlight">Routing Based on Tools Usage</a></li><li><a href="#routing-based-on-metadata" class="table-of-contents__link toc-highlight">Routing Based on Metadata</a></li><li><a href="#routing-based-on-capacity-usage" class="table-of-contents__link toc-highlight">Routing Based on Capacity Usage</a></li><li><a href="#available-routing-fields-and-expressions" class="table-of-contents__link toc-highlight">Available Routing Fields and Expressions</a><ul><li><a href="#token-based-conditions" class="table-of-contents__link toc-highlight">Token-Based Conditions</a></li><li><a href="#request-conditions-canonical-responses-shape" class="table-of-contents__link toc-highlight">Request Conditions (Canonical Responses Shape)</a></li><li><a href="#derived-convenience-variables" class="table-of-contents__link toc-highlight">Derived Convenience Variables</a></li><li><a href="#format-and-native-body-conditions" class="table-of-contents__link toc-highlight">Format and Native-Body Conditions</a></li><li><a href="#metadata-variables" class="table-of-contents__link toc-highlight">Metadata Variables</a></li><li><a href="#error-rate-function" class="table-of-contents__link toc-highlight">Error-Rate Function</a></li><li><a href="#capacity-usage-function" class="table-of-contents__link toc-highlight">Capacity-Usage Function</a></li></ul></li><li><a href="#available-comparators" class="table-of-contents__link toc-highlight">Available Comparators</a></li><li><a href="#routing-actions" class="table-of-contents__link toc-highlight">Routing Actions</a></li><li><a href="#traffic-splitting" class="table-of-contents__link toc-highlight">Traffic Splitting</a></li><li><a href="#best-practices" class="table-of-contents__link toc-highlight">Best Practices</a><ul><li><a href="#1-start-with-simple-conditions" class="table-of-contents__link toc-highlight">1. Start with Simple Conditions</a></li><li><a href="#2-test-routing-conditions" class="table-of-contents__link toc-highlight">2. Test Routing Conditions</a></li><li><a href="#3-use-traffic-splitting-for-rollouts" class="table-of-contents__link toc-highlight">3. Use Traffic Splitting for Rollouts</a></li><li><a href="#4-monitor-routing-decisions" class="table-of-contents__link toc-highlight">4. Monitor Routing Decisions</a></li></ul></li><li><a href="#troubleshooting" class="table-of-contents__link toc-highlight">Troubleshooting</a><ul><li><a href="#routing-not-working" class="table-of-contents__link toc-highlight">Routing Not Working</a></li><li><a href="#wrong-model-selected" class="table-of-contents__link toc-highlight">Wrong Model Selected</a></li><li><a href="#metadata-rule-never-fires" class="table-of-contents__link toc-highlight">Metadata Rule Never Fires</a></li><li><a href="#capacity-usage-rule-never-fires" class="table-of-contents__link toc-highlight">Capacity-Usage Rule Never Fires</a></li></ul></li><li><a href="#next-steps" class="table-of-contents__link toc-highlight">Next Steps</a></li></ul></div></div></div></div></main></div></div></div><footer class="theme-layout-footer footer footer--dark"><div class="container container-fluid"><div class="row footer__links"><div class="theme-layout-footer-column col footer__col"><div class="footer__title">Docs</div><ul class="footer__items clean-list"><li class="footer__item"><a class="footer__link-item" href="/docs/intro/">Tutorial</a></li></ul></div><div class="theme-layout-footer-column col footer__col"><div class="footer__title">More</div><ul class="footer__items clean-list"><li class="footer__item"><a href="https://github.com/vm-x-ai" target="_blank" rel="noopener noreferrer" class="footer__link-item">GitHub<svg width="13.5" height="13.5" aria-label="(opens in new tab)" class="iconExternalLink_yjJm"><use href="#theme-svg-external-link"></use></svg></a></li></ul></div></div><div class="footer__bottom text--center"><div class="footer__copyright">Copyright © 2026 VM-X, Inc. Built with Docusaurus.</div></div></div></footer></div>
 </body>
 </html>
